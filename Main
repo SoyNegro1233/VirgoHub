@@ -1,0 +1,226 @@
+--------------------------------------------------------------------------------
+-- [ 1. SERVICIOS ]
+--------------------------------------------------------------------------------
+local Players = game:GetService("Players")
+local Teams = game:GetService("Teams")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------------------------------------
+-- [ 2. GUI (LINORIALIB) ]
+--------------------------------------------------------------------------------
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+
+local Window = Library:CreateWindow({
+    Title = 'VirgoHub',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8,
+    MenuFadeTime = 0.2
+})
+
+local Tabs = {
+    Main = Window:AddTab('Visuals'),
+    Util = Window:AddTab('Utility'),
+    ['UI Settings'] = Window:AddTab('UI Settings'),
+}
+
+local EspGroup = Tabs.Main:AddLeftGroupbox('ESP')
+
+EspGroup:AddToggle('EspEnabled', { Text = 'Enabled', Default = false })
+EspGroup:AddDivider()
+EspGroup:AddToggle('EspBoxes', { Text = 'Box 2D (Static)', Default = false })
+EspGroup:AddToggle('EspOrientedBox', { Text = 'Oriented Box (Rotates)', Default = false })
+
+EspGroup:AddSlider('EspBoxWidth', { Text = 'Box Width', Default = 4, Min = 0.5, Max = 5, Rounding = 1, Compact = false })
+EspGroup:AddSlider('EspBoxHeight', { Text = 'Box Height', Default = 5, Min = 0.5, Max = 5, Rounding = 1, Compact = false })
+
+EspGroup:AddToggle('EspNames', { Text = 'Names', Default = false })
+EspGroup:AddToggle('EspHealth', { Text = 'Health', Default = false })
+EspGroup:AddToggle('EspDistance', { Text = 'Distance', Default = false })
+EspGroup:AddToggle('EspTracer', { Text = 'Tracer', Default = false })
+EspGroup:AddDivider()
+EspGroup:AddToggle('EspTeamColor', { Text = 'Team Color', Default = false })
+EspGroup:AddDropdown('SelectedTeam', { Text = 'Select Team', Values = {}, Default = 1 })
+EspGroup:AddLabel('Custom Team Color'):AddColorPicker('TeamCustomColor', { Default = Color3.new(1,1,1) })
+
+local UtilGroup = Tabs.Util:AddLeftGroupbox('Other')
+UtilGroup:AddToggle('InstantPrompt', { Text = 'Instant ProximityPrompt', Default = false })
+
+--------------------------------------------------------------------------------
+-- [ 3. LOGICAS DE EQUIPO Y COLORES ]
+--------------------------------------------------------------------------------
+local CustomTeamColors = {}
+
+local function UpdateTeamList()
+    local teamNames = {}
+    for _, team in pairs(Teams:GetTeams()) do
+        table.insert(teamNames, team.Name)
+        if not CustomTeamColors[team.Name] then 
+            CustomTeamColors[team.Name] = team.TeamColor.Color 
+        end
+    end
+    Options.SelectedTeam:SetValues(teamNames)
+end
+
+-- Actualizar el ColorPicker cuando cambias de equipo en el Dropdown
+Options.SelectedTeam:OnChanged(function()
+    local teamName = Options.SelectedTeam.Value
+    if teamName and CustomTeamColors[teamName] then
+        Options.TeamCustomColor:SetValueNoCallback(CustomTeamColors[teamName])
+    end
+end)
+
+-- Actualizar el color del equipo cuando mueves el ColorPicker
+Options.TeamCustomColor:OnChanged(function()
+    local teamName = Options.SelectedTeam.Value
+    if teamName then
+        CustomTeamColors[teamName] = Options.TeamCustomColor.Value
+    end
+end)
+
+Teams.ChildAdded:Connect(UpdateTeamList); Teams.ChildRemoved:Connect(UpdateTeamList); UpdateTeamList()
+
+--------------------------------------------------------------------------------
+-- [ 4. INSTANT PROMPT ]
+--------------------------------------------------------------------------------
+local function handlePrompt(obj)
+    if obj:IsA("ProximityPrompt") then
+        RunService.Heartbeat:Connect(function()
+            if Toggles.InstantPrompt.Value then obj.HoldDuration = 0 end
+        end)
+    end
+end
+game.DescendantAdded:Connect(handlePrompt)
+for _, v in pairs(game:GetDescendants()) do handlePrompt(v) end
+
+--------------------------------------------------------------------------------
+-- [ 5. LOGICA ESP ]
+--------------------------------------------------------------------------------
+local function createEsp(player)
+    local box = Drawing.new("Square")
+    local orientedLines = {Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line")}
+    local displayNameTag = Drawing.new("Text")
+    local userNameTag = Drawing.new("Text")
+    local healthTag = Drawing.new("Text")
+    local distanceTag = Drawing.new("Text")
+    local tracerLine = Drawing.new("Line")
+    local GrayColor = Color3.fromRGB(200, 200, 200)
+
+    for _, line in pairs(orientedLines) do line.Thickness = 1; line.Visible = false end
+
+    local function update()
+        local connection
+        connection = RunService.RenderStepped:Connect(function()
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local hum = char and char:FindFirstChild("Humanoid")
+
+            if not Toggles.EspEnabled.Value or not char or not player.Parent or not hrp or not hum then
+                box.Visible = false; displayNameTag.Visible = false; userNameTag.Visible = false
+                healthTag.Visible = false; distanceTag.Visible = false; tracerLine.Visible = false
+                for _, l in pairs(orientedLines) do l.Visible = false end
+                if not player.Parent or Library.Unloaded then
+                    box:Remove(); displayNameTag:Remove(); userNameTag:Remove(); healthTag:Remove(); distanceTag:Remove(); tracerLine:Remove()
+                    for _, l in pairs(orientedLines) do l:Remove() end
+                    connection:Disconnect()
+                end
+                return
+            end
+
+            local boxOffset = Vector3.new(0, -0.5, 0)
+            local adjustedPos = hrp.Position + boxOffset
+            local _, onScreen = Camera:WorldToViewportPoint(adjustedPos)
+
+            if onScreen then
+                local screenPos = Camera:WorldToViewportPoint(adjustedPos)
+                local renderColor = (Toggles.EspTeamColor.Value and player.Team and CustomTeamColors[player.Team.Name]) or Color3.new(1,1,1)
+                
+                local currentWidth = Options.EspBoxWidth.Value
+                local currentHeight = Options.EspBoxHeight.Value
+
+                if Toggles.EspOrientedBox.Value then
+                    local size = Vector3.new(currentWidth, currentHeight, 0)
+                    local cf = hrp.CFrame * CFrame.new(0, -0.5, 0)
+                    local corners = {
+                        Camera:WorldToViewportPoint((cf * CFrame.new(-size.X/2, size.Y/2, 0)).Position),
+                        Camera:WorldToViewportPoint((cf * CFrame.new(size.X/2, size.Y/2, 0)).Position),
+                        Camera:WorldToViewportPoint((cf * CFrame.new(size.X/2, -size.Y/2, 0)).Position),
+                        Camera:WorldToViewportPoint((cf * CFrame.new(-size.X/2, -size.Y/2, 0)).Position)
+                    }
+                    for i = 1, 4 do
+                        orientedLines[i].From = Vector2.new(corners[i].X, corners[i].Y)
+                        orientedLines[i].To = Vector2.new(corners[i % 4 + 1].X, corners[i % 4 + 1].Y)
+                        orientedLines[i].Color = renderColor; orientedLines[i].Visible = true
+                    end
+                    box.Visible = false
+                else
+                    for _, l in pairs(orientedLines) do l.Visible = false end
+                    box.Visible = Toggles.EspBoxes.Value
+                end
+
+                local dist = screenPos.Z
+                local multiplier = 1000/dist
+                local boxSizeX = (currentWidth * 500) / dist
+                local boxSizeY = (currentHeight * 600) / dist
+                local boxTop = screenPos.Y - boxSizeY/2
+                local boxBottom = screenPos.Y + boxSizeY/2
+                local calculatedSize = math.clamp(multiplier * 0.5, 12, 24)
+
+                if Toggles.EspBoxes.Value and not Toggles.EspOrientedBox.Value then
+                    box.Color = renderColor; box.Size = Vector2.new(boxSizeX, boxSizeY)
+                    box.Position = Vector2.new(screenPos.X - boxSizeX/2, boxTop); box.Visible = true
+                end
+
+                if Toggles.EspNames.Value then
+                    displayNameTag.Text = player.DisplayName; displayNameTag.Size = calculatedSize; displayNameTag.Color = renderColor
+                    displayNameTag.Position = Vector2.new(screenPos.X, boxTop - (calculatedSize + 14)); displayNameTag.Visible = true
+                    userNameTag.Text = "@"..player.Name; userNameTag.Size = calculatedSize * 0.8; userNameTag.Color = GrayColor
+                    userNameTag.Position = Vector2.new(screenPos.X, boxTop - 14); userNameTag.Visible = true
+                else displayNameTag.Visible = false; userNameTag.Visible = false end
+
+                local offset = boxBottom + 2
+                if Toggles.EspHealth.Value then
+                    healthTag.Text = math.floor(hum.Health).." HP"; healthTag.Size = calculatedSize
+                    healthTag.Color = Color3.new(1,0,0):Lerp(Color3.new(0,1,0), hum.Health/hum.MaxHealth)
+                    healthTag.Position = Vector2.new(screenPos.X, offset); healthTag.Visible = true
+                    offset = offset + calculatedSize
+                else healthTag.Visible = false end
+
+                if Toggles.EspDistance.Value then
+                    local mag = math.floor((hrp.Position - Camera.Focus.Position).Magnitude)
+                    distanceTag.Text = mag.." studs"; distanceTag.Size = calculatedSize * 0.8; distanceTag.Color = GrayColor
+                    distanceTag.Position = Vector2.new(screenPos.X, offset); distanceTag.Visible = true
+                else distanceTag.Visible = false end
+
+                if Toggles.EspTracer.Value then
+                    tracerLine.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y); tracerLine.To = Vector2.new(screenPos.X, screenPos.Y)
+                    tracerLine.Color = renderColor; tracerLine.Visible = true
+                else tracerLine.Visible = false end
+            else
+                box.Visible = false; for _, l in pairs(orientedLines) do l.Visible = false end
+                displayNameTag.Visible = false; userNameTag.Visible = false; healthTag.Visible = false; distanceTag.Visible = false; tracerLine.Visible = false
+            end
+        end)
+    end
+    for _, t in pairs({displayNameTag, userNameTag, healthTag, distanceTag}) do t.Center = true; t.Outline = true end
+    coroutine.wrap(update)()
+end
+
+for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then createEsp(p) end end
+Players.PlayerAdded:Connect(function(p) if p ~= LocalPlayer then createEsp(p) end end)
+
+--------------------------------------------------------------------------------
+-- [ 6. UI SETTINGS (THEME & SAVE) ]
+--------------------------------------------------------------------------------
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+ThemeManager:SetFolder('VirgoHub')
+SaveManager:SetFolder('VirgoHub/configs')
+SaveManager:BuildConfigSection(Tabs['UI Settings'])
+ThemeManager:ApplyToTab(Tabs['UI Settings'])
+SaveManager:IgnoreThemeSettings()
