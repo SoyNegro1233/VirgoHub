@@ -1,66 +1,58 @@
 local Library = loadstring(game:HttpGet('https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/Library.lua'))()
 local HttpService = game:GetService("HttpService")
 
-local Config = {
-    name = "VirgoHub",
-    ownerid = "ssLw7ktrUq",
-    secret = "068cdfe3b6ed903af4d6b6116e311ff5277ed0cf171f832cf6b0211d3f7d9934",
-    version = "1.0"
-}
-local SessionId = ""
+local ProjectID = "virgohub-5edcc" 
+local BaseURL = "https://firestore.googleapis.com/v1/projects/" .. ProjectID .. "/databases/(default)/documents/Keys/"
 
-local function KeyAuthRequest(type, key)
-    local req = (syn and syn.request or http_request or request)
-    if not req then return nil end
-
-    local response = req({
-        Url = "https://keyauth.win/api/1.1/",
-        Method = "POST",
-        Body = "type=" .. type .. "&name=" .. Config.name .. "&ownerid=" .. Config.ownerid .. "&secret=" .. Config.secret .. "&version=" .. Config.version .. (key and "&key=" .. key or "") .. (SessionId ~= "" and "&sessionid=" .. SessionId or ""),
-        Headers = {["Content-Type"] = "application/x-www-form-urlencoded"}
-    })
+local function VerifyKeyFirestore(input)
+    -- Intentamos obtener el documento con el nombre de la key
+    local success, response = pcall(function()
+        return game:HttpGet(BaseURL .. input)
+    end)
     
-    return HttpService:JSONDecode(response.Body)
+    if success and not string.find(response, "NOT_FOUND") then
+        local data = HttpService:JSONDecode(response)
+        
+        -- En Firestore, los datos están dentro de fields -> Nombre -> stringValue
+        if data.fields and data.fields.Info then
+            local info = data.fields.Info.stringValue
+            return true, info
+        end
+    end
+    return false, "Key inválida o no encontrada"
 end
 
-local init = KeyAuthRequest("init")
-if init and init.success then
-    SessionId = init.sessionid
-end
-
-
+-- // VENTANA DE KEY SYSTEM //
 local Window = Library:CreateWindow({
-    Title = 'Key System - VirgoHub',
+    Title = 'VirgoHub - Key System',
     Center = true,
     AutoShow = true,
     Size = UDim2.new(0, 500, 0, 185)
 })
 
 local Tabs = { Main = Window:AddTab('Verification') }
-local LeftGroup = Tabs.Main:AddLeftGroupbox('Input Key')
+local LeftGroup = Tabs.Main:AddLeftGroupbox('Key System')
 
 LeftGroup:AddInput('KeyInput', {
     Text = 'Key:',
     Default = '',
-    Placeholder = 'Paste key here...',
+    Placeholder = 'Imput Key...',
     Callback = function(Value) _G.EnteredKey = Value end
 })
 
 LeftGroup:AddButton('Verify', function()
-    local res = KeyAuthRequest("license", _G.EnteredKey)
-    
-    if res and res.success then
+    local isValid, status = VerifyKeyFirestore(_G.EnteredKey)
+    if isValid then
         task.wait(0.2)
         Library:Unload()
-        
+
         loadstring(game:HttpGet((function() local t={104,116,116,112,115,58,47,47,114,97,119,46,103,105,116,104,117,98,117,115,101,114,99,111,110,116,101,110,116,46,99,111,109,47,83,111,121,78,101,103,114,111,49,50,51,51,47,86,105,114,103,111,72,117,98,47,109,97,105,110,47,85,105,77,97,105,110} local s="" for _,v in pairs(t) do s=s..string.char(v) end return s end)()))()
     else
-        Library:Notify('invalid key', 2)
+        Library:Notify('Error: ' .. status, 4)
     end
 end)
 
-local RightGroup = Tabs.Main:AddRightGroupbox('Links')
-RightGroup:AddButton('Get Key', function()
+Tabs.Main:AddRightGroupbox('Links'):AddButton('Discord', function()
     setclipboard("https://discord.gg/CfCJHVgM9U")
-    Library:Notify('Copied link!', 2)
+    Library:Notify('idk', 2)
 end)
